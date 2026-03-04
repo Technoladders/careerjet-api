@@ -1,0 +1,37 @@
+# docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Lives on server at: /home/deploy/apps/careerjet-api/docker-compose.yml
+# GitHub Actions writes .env here before running docker compose up
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: '3.8'
+
+networks:
+  # Same external network as your nginx-proxy and other containers
+  zivelogin-network-prod:
+    external: true
+
+services:
+  careerjet-api:
+    image: xrilictechnologies/careerjet-api:${DOCKER_TAG:-prod-latest}
+    container_name: ${CONTAINER_NAME:-careerjet-api}
+    restart: unless-stopped
+
+    networks:
+      - zivelogin-network-prod
+
+    # Port 3001 exposed on host for health checks / direct testing
+    # Nginx Proxy Manager routes api.xrilic.ai → this container internally
+    ports:
+      - "3001:3001"
+
+    environment:
+      PORT: 3001
+      # Written by GitHub Actions deploy step from secret PROXY_SECRET_PROD
+      PROXY_SECRET: ${PROXY_SECRET}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout:  5s
+      retries:  3

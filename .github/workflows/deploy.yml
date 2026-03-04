@@ -1,0 +1,95 @@
+name: Deploy CareerJet API
+
+on:
+  push:
+    branches:
+      - main          # prod deploy
+      - staging       # staging deploy
+      - dev           # dev deploy
+  workflow_dispatch:  # manual trigger from GitHub UI
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout code ───────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Set environment based on branch ─────────────────────────────────
+      - name: Set environment variables
+        run: |
+          case "${{ github.ref_name }}" in
+            main)
+              echo "DOCKER_TAG=prod-latest"                        >> $GITHUB_ENV
+              echo "CONTAINER_NAME=careerjet-api"                  >> $GITHUB_ENV
+              echo "DEPLOY_PATH=/home/deploy/apps/careerjet-api"   >> $GITHUB_ENV
+              echo "PROXY_SECRET=${{ secrets.PROXY_SECRET_PROD }}" >> $GITHUB_ENV
+              ;;
+            staging)
+              echo "DOCKER_TAG=staging-latest"                     >> $GITHUB_ENV
+              echo "CONTAINER_NAME=careerjet-api-staging"          >> $GITHUB_ENV
+              echo "DEPLOY_PATH=/home/deploy/apps/careerjet-api"   >> $GITHUB_ENV
+              echo "PROXY_SECRET=${{ secrets.PROXY_SECRET_PROD }}" >> $GITHUB_ENV
+              ;;
+            dev)
+              echo "DOCKER_TAG=dev-latest"                         >> $GITHUB_ENV
+              echo "CONTAINER_NAME=careerjet-api-dev"              >> $GITHUB_ENV
+              echo "DEPLOY_PATH=/home/deploy/apps/careerjet-api"   >> $GITHUB_ENV
+              echo "PROXY_SECRET=${{ secrets.PROXY_SECRET_PROD }}" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "Unknown branch" >&2 && exit 1
+              ;;
+          esac
+
+      # ── 3. Set up Docker Buildx ────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 4. Login to Docker Hub ─────────────────────────────────────────────
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── 5. Build and push Docker image ─────────────────────────────────────
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/careerjet-api:${{ env.DOCKER_TAG }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      # ── 6. Deploy to server via SSH ────────────────────────────────────────
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key:      ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "→ Pulling latest image..."
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/careerjet-api:${{ env.DOCKER_TAG }}
+
+            echo "→ Writing .env..."
+            cat > .env << 'ENVEOF'
+            DOCKER_TAG=${{ env.DOCKER_TAG }}
+            CONTAINER_NAME=${{ env.CONTAINER_NAME }}
+            PROXY_SECRET=${{ env.PROXY_SECRET }}
+            ENVEOF
+
+            echo "→ Restarting container..."
+            docker compose up -d --no-deps --force-recreate --remove-orphans
+
+            echo "→ Pruning old images..."
+            docker image prune -f
+
+            echo "✓ CareerJet API deployed (${{ env.DOCKER_TAG }})"
