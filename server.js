@@ -129,4 +129,4 @@ app.listen(PORT, () => {
   console.log(`✓ CareerJet proxy running on port ${PORT}`);
   console.log(`  Secret protection: ${process.env.PROXY_SECRET ? 'ENABLED' : 'DISABLED (set PROXY_SECRET)'}`);
 });
-// changes
+// changes for secret key 
